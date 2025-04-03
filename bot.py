@@ -2,7 +2,14 @@ import os
 import requests
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters, CallbackQueryHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackContext,
+    MessageHandler,
+    filters,
+    CallbackQueryHandler
+)
 import schedule
 import time
 from threading import Thread
@@ -76,16 +83,15 @@ def run_schedule():
         time.sleep(10)
 
 # Setting up Telegram bot handlers
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-dp = updater.dispatcher
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(CallbackQueryHandler(button_handler))
-dp.add_handler(MessageHandler(Filters.text & ~Filters.command, set_alert))
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(button_handler))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_alert))
 
 # Run the scheduler in a separate thread
 schedule.every(30).seconds.do(check_alerts)
 Thread(target=run_schedule, daemon=True).start()
 
 # Start the bot
-updater.start_polling()
-updater.idle()
+application.run_polling()
