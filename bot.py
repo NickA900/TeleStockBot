@@ -1,4 +1,13 @@
 import os
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# Debugging: Print the token to check if it's being read correctly
+if TELEGRAM_TOKEN:
+    print(f"Token Loaded: {TELEGRAM_TOKEN[:5]}********")  # Only show first 5 characters for security
+else:
+    print("Error: TELEGRAM_TOKEN is not set or is empty!")
+
 import requests
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
