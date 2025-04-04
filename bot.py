@@ -11,12 +11,15 @@ from telegram.ext import (
     filters,
     ConversationHandler,
 )
-from dotenv import load_dotenv  # Load environment variables
+from dotenv import load_dotenvLoad environment variables
+
 load_dotenv() TOKEN = os.getenv("BOT_TOKEN") PORT = int(os.environ.get("PORT", 8443))
 
-logging.basicConfig( format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO, )
+Logging setup
 
-Define conversation states
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+
+Conversation states
 
 MAIN_MENU, SEARCH_STOCK, HANDLE_STOCK_SELECTION, REMOVE_STOCK = range(4)
 
@@ -24,9 +27,9 @@ User alert tracking
 
 user_alerts = {}
 
-async def search_stock_online(query): """Fetch stock search suggestions from Yahoo Finance.""" url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}" async with httpx.AsyncClient() as client: response = await client.get(url) if response.status_code == 200: data = response.json() return [item['shortname'] for item in data.get('quotes', []) if 'shortname' in item] return []
+async def search_stocks_online(query): """Fetch stock suggestions from Google search.""" url = f"https://www.google.com/search?q={query}+stock+price" async with httpx.AsyncClient() as client: response = await client.get(url) if response.status_code == 200: return [query.capitalize()]  # Dummy result; replace with actual parsing if needed return []
 
-async def start(update: Update, context: CallbackContext): keyboard = [ [ InlineKeyboardButton("Search Stock", callback_data="search"), InlineKeyboardButton("New Stock Alert", callback_data="add"), ], [ InlineKeyboardButton("Existing Stock Alerts", callback_data="existing"), InlineKeyboardButton("Remove Stock", callback_data="remove"), ], ] reply_markup = InlineKeyboardMarkup(keyboard) await update.message.reply_text("Welcome to TeleStockBot!", reply_markup=reply_markup) return MAIN_MENU
+async def start(update: Update, context: CallbackContext): keyboard = [ [InlineKeyboardButton("Search Stock", callback_data="search"), InlineKeyboardButton("New Stock Alert", callback_data="add")], [InlineKeyboardButton("Existing Stock Alerts", callback_data="existing"), InlineKeyboardButton("Remove Stock", callback_data="remove")], ] reply_markup = InlineKeyboardMarkup(keyboard) await update.message.reply_text("Welcome to TeleStockBot!", reply_markup=reply_markup) return MAIN_MENU
 
 async def main_menu_handler(update: Update, context: CallbackContext): query = update.callback_query await query.answer() action = query.data
 
@@ -56,7 +59,7 @@ elif action == "remove":
     await query.edit_message_text("Select stock to remove:", reply_markup=reply_markup)
     return REMOVE_STOCK
 
-async def search_stock(update: Update, context: CallbackContext): text = update.message.text.lower() matches = await search_stock_online(text)
+async def search_stock(update: Update, context: CallbackContext): text = update.message.text.lower() matches = await search_stocks_online(text)
 
 if not matches:
     await update.message.reply_text("No matching stocks found.")
@@ -69,15 +72,16 @@ return HANDLE_STOCK_SELECTION
 
 async def handle_stock_selection(update: Update, context: CallbackContext): query = update.callback_query await query.answer() stock = query.data context.user_data["selected_stock"] = stock
 
-keyboard = [
-    [
-        InlineKeyboardButton("Set Alert", callback_data="set_alert"),
-        InlineKeyboardButton("Detailed Info", callback_data="details"),
+if context.user_data.get("add_mode"):
+    keyboard = [
+        [InlineKeyboardButton("Set Alert", callback_data="set_alert"), InlineKeyboardButton("Detailed Info", callback_data="details")],
     ]
-]
-reply_markup = InlineKeyboardMarkup(keyboard)
-await query.edit_message_text(f"You selected: {stock}", reply_markup=reply_markup)
-return HANDLE_STOCK_SELECTION
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"You selected: {stock}", reply_markup=reply_markup)
+    return HANDLE_STOCK_SELECTION
+else:
+    await query.edit_message_text(f"Fetching latest price for {stock}...")
+    return MAIN_MENU
 
 async def handle_alert_or_info(update: Update, context: CallbackContext): query = update.callback_query await query.answer() action = query.data stock = context.user_data.get("selected_stock") user_id = str(update.effective_user.id)
 
@@ -85,6 +89,7 @@ if action == "set_alert":
     if stock not in user_alerts.get(user_id, []):
         user_alerts.setdefault(user_id, []).append(stock)
     await query.edit_message_text(f"Alert set for {stock}!")
+
 elif action == "details":
     await query.edit_message_text(f"Fetching details for {stock}...")
 
@@ -92,19 +97,5 @@ return MAIN_MENU
 
 async def remove_stock(update: Update, context: CallbackContext): query = update.callback_query await query.answer() stock = query.data user_id = str(update.effective_user.id) if stock in user_alerts.get(user_id, []): user_alerts[user_id].remove(stock) await query.edit_message_text(f"Removed alert for {stock}.") return MAIN_MENU
 
-if name == "main": app = ApplicationBuilder().token(TOKEN).build()
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        MAIN_MENU: [CallbackQueryHandler(main_menu_handler)],
-        SEARCH_STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock)],
-        HANDLE_STOCK_SELECTION: [CallbackQueryHandler(handle_alert_or_info)],
-        REMOVE_STOCK: [CallbackQueryHandler(remove_stock)],
-    },
-    fallbacks=[CommandHandler("start", start)],
-)
-
-app.add_handler(conv_handler)
-app.run_polling()
+if name == "main": app = ApplicationBuilder().token(TOKEN).build() conv_handler = ConversationHandler( entry_points=[CommandHandler("start", start)], states={ MAIN_MENU: [CallbackQueryHandler(main_menu_handler)], SEARCH_STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock)], HANDLE_STOCK_SELECTION: [CallbackQueryHandler(handle_alert_or_info)], REMOVE_STOCK: [CallbackQueryHandler(remove_stock)], }, fallbacks=[CommandHandler("start", start)], ) app.add_handler(conv_handler) app.run_polling()
 
