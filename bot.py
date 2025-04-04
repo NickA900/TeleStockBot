@@ -11,8 +11,7 @@ from telegram.ext import (
     filters,
     ConversationHandler,
 )
-from dotenv import load_dotenvLoad environment variables
-
+from dotenv import load_dotenv  # Load environment variables
 load_dotenv() TOKEN = os.getenv("BOT_TOKEN") PORT = int(os.environ.get("PORT", 8443))
 
 logging.basicConfig( format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO, )
