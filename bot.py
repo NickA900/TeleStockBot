@@ -3,19 +3,18 @@ import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
-    CallbackContext,
     CallbackQueryHandler,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
     filters,
     ConversationHandler,
+    ContextTypes,
 )
 from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 PORT = int(os.environ.get("PORT", 8443))
 
 logging.basicConfig(
@@ -45,7 +44,7 @@ mock_stock_data = {
 }
 
 
-async def start(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("Search Stock", callback_data="search"),
@@ -61,7 +60,7 @@ async def start(update: Update, context: CallbackContext.DEFAULT_TYPE):
     return MAIN_MENU
 
 
-async def main_menu_handler(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = query.data
@@ -93,7 +92,7 @@ async def main_menu_handler(update: Update, context: CallbackContext.DEFAULT_TYP
         return REMOVE_STOCK
 
 
-async def search_stock(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def search_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     matches = [name for name in mock_stock_data if text in name.lower()]
 
@@ -107,7 +106,7 @@ async def search_stock(update: Update, context: CallbackContext.DEFAULT_TYPE):
     return HANDLE_STOCK_SELECTION
 
 
-async def handle_stock_selection(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def handle_stock_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     stock = query.data
@@ -129,7 +128,7 @@ async def handle_stock_selection(update: Update, context: CallbackContext.DEFAUL
         return MAIN_MENU
 
 
-async def handle_alert_or_info(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def handle_alert_or_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = query.data
@@ -148,7 +147,7 @@ async def handle_alert_or_info(update: Update, context: CallbackContext.DEFAULT_
     return MAIN_MENU
 
 
-async def remove_stock(update: Update, context: CallbackContext.DEFAULT_TYPE):
+async def remove_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     stock = query.data
