@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+print("TELEGRAM_BOT_TOKEN:", TELEGRAM_BOT_TOKEN)
+print("FINNHUB_API_KEY:", FINNHUB_API_KEY)
+
 # API keys and tokens
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
