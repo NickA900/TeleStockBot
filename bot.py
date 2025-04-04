@@ -1,10 +1,9 @@
 import os
 import logging
-import httpx
-import time
+import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (ApplicationBuilder, CallbackContext, CallbackQueryHandler, 
-                           CommandHandler, MessageHandler, filters, ConversationHandler)
+                          CommandHandler, MessageHandler, filters, ConversationHandler)
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -58,18 +57,24 @@ async def button_handler(update: Update, context: CallbackContext):
         else:
             await query.message.reply_text("No alerts to remove.")
 
-# Search for stock by name
+# Search for stock by name (FIXED)
 async def search_stock(update: Update, context: CallbackContext):
     stock_name = update.message.text
     url = f"https://finnhub.io/api/v1/search?q={stock_name}&token={FINNHUB_API_KEY}"
-    response = httpx.get(url).json()
+    
+    try:
+        response = requests.get(url).json()
+        print("Finnhub API Response:", response)  # Debugging output
 
-    if response.get("result"):
-        keyboard = [[InlineKeyboardButton(stock["description"], callback_data=f"select_{stock['symbol']}")] for stock in response["result"]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Select a stock:", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("No results found.")
+        if response.get("result"):
+            keyboard = [[InlineKeyboardButton(stock["description"], callback_data=f"select_{stock['symbol']}")] for stock in response["result"]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("Select a stock:", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text("No results found.")
+    except Exception as e:
+        print("Error fetching stock data:", e)
+        await update.message.reply_text("Error fetching stock data. Try again later.")
 
 # Select a stock from the search results
 async def select_stock(update: Update, context: CallbackContext):
@@ -77,15 +82,20 @@ async def select_stock(update: Update, context: CallbackContext):
     await query.answer()
     symbol = query.data.split("_")[1]
     url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
-    data = httpx.get(url).json()
-    message = f"{symbol} \nCurrent Price: {data['c']} \nHigh: {data['h']} \nLow: {data['l']}"
+    
+    try:
+        data = requests.get(url).json()
+        message = f"{symbol} \nCurrent Price: {data['c']} \nHigh: {data['h']} \nLow: {data['l']}"
 
-    keyboard = [
-        [InlineKeyboardButton("Set Alert", callback_data=f"alert_{symbol}")],
-        [InlineKeyboardButton("Show More Stocks", callback_data="search")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text(message, reply_markup=reply_markup)
+        keyboard = [
+            [InlineKeyboardButton("Set Alert", callback_data=f"alert_{symbol}")],
+            [InlineKeyboardButton("Show More Stocks", callback_data="search")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text(message, reply_markup=reply_markup)
+    except Exception as e:
+        print("Error fetching stock details:", e)
+        await query.message.reply_text("Error fetching stock details. Try again later.")
 
 # Set price alert for a stock
 async def set_alert(update: Update, context: CallbackContext):
@@ -98,10 +108,13 @@ async def set_alert(update: Update, context: CallbackContext):
 
 # Save the alert price
 async def save_alert(update: Update, context: CallbackContext):
-    price = float(update.message.text)
-    stock = list(user_alerts.keys())[-1]
-    user_alerts[stock] = price
-    await update.message.reply_text(f"Alert set for {stock} at {price}")
+    try:
+        price = float(update.message.text)
+        stock = list(user_alerts.keys())[-1]
+        user_alerts[stock] = price
+        await update.message.reply_text(f"Alert set for {stock} at {price}")
+    except ValueError:
+        await update.message.reply_text("Invalid price. Please enter a valid number.")
     return ConversationHandler.END
 
 # Remove alert for a stock
@@ -117,10 +130,13 @@ async def remove_alert(update: Update, context: CallbackContext):
 async def check_alerts(context: CallbackContext):
     for stock, target_price in user_alerts.items():
         url = f"https://finnhub.io/api/v1/quote?symbol={stock}&token={FINNHUB_API_KEY}"
-        data = httpx.get(url).json()
-        current_price = data.get("c")
-        if current_price and target_price and current_price <= target_price:
-            await context.bot.send_message(chat_id=context.job.chat_id, text=f"{stock} reached your alert price: {target_price}")
+        try:
+            data = requests.get(url).json()
+            current_price = data.get("c")
+            if current_price and target_price and current_price <= target_price:
+                await context.bot.send_message(chat_id=context.job.chat_id, text=f"{stock} reached your alert price: {target_price}")
+        except Exception as e:
+            print(f"Error checking alerts for {stock}:", e)
 
 # Create the application and add handlers
 application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
@@ -139,7 +155,10 @@ application.add_handler(conv_handler)
 application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(CallbackQueryHandler(select_stock, pattern="^select_"))
 application.add_handler(CallbackQueryHandler(set_alert, pattern="^alert_"))
-application.job_queue.run_repeating(check_alerts, interval=3600)
+
+# **Fix Job Queue Issue**
+job_queue = application.job_queue
+job_queue.run_repeating(check_alerts, interval=3600)
 
 # Start the bot polling
 application.run_polling()
