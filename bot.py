@@ -1,171 +1,142 @@
 import os
 import logging
 import httpx
+import time
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CallbackContext,
-    CallbackQueryHandler,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ConversationHandler,
-)
+from telegram.ext import (ApplicationBuilder, CallbackContext, CallbackQueryHandler, 
+                           CommandHandler, MessageHandler, filters, ConversationHandler)
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
 
-# Ensure the token is valid
-if not TOKEN:
-    raise ValueError("BOT_TOKEN is missing. Please set it in your .env file.")
+# API keys and tokens
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Logging setup
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
-# Define conversation states
-MAIN_MENU, SEARCH_STOCK, HANDLE_STOCK_SELECTION, REMOVE_STOCK = range(4)
-
-# User alert tracking
+# Conversation states
+SEARCH, SET_ALERT, REMOVE_ALERT = range(3)
 user_alerts = {}
 
-# Function to fetch stock suggestions from a search engine
-def get_stock_suggestions(query):
-    search_url = f"https://www.google.com/search?q={query}+stock+price"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
-    try:
-        response = httpx.get(search_url, headers=headers)
-        if response.status_code == 200:
-            return [f"{query} Stock - Result {i+1}" for i in range(5)]
-        return ["No results found."]
-    except Exception as e:
-        return [f"Error fetching results: {str(e)}"]
-
+# Start command handler
 async def start(update: Update, context: CallbackContext):
     keyboard = [
-        [InlineKeyboardButton("🔍 Search Stock", callback_data="search")],
-        [InlineKeyboardButton("📈 Existing Alerts", callback_data="existing")],
-        [InlineKeyboardButton("❌ Remove Stock", callback_data="remove")]
+        [InlineKeyboardButton("Search Stock", callback_data="search")],
+        [InlineKeyboardButton("Existing Stock Alerts", callback_data="alerts")],
+        [InlineKeyboardButton("Add More", callback_data="add")],
+        [InlineKeyboardButton("Remove Alert", callback_data="remove")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Welcome to *TeleStockBot*! Choose an option:", reply_markup=reply_markup, parse_mode="Markdown")
-    return MAIN_MENU
+    await update.message.reply_text("Choose an option:", reply_markup=reply_markup)
 
-async def main_menu_handler(update: Update, context: CallbackContext):
+# Button handler for the options menu
+async def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
-    action = query.data
 
-    if action == "search":
-        await query.edit_message_text("Enter stock name to search:")
-        return SEARCH_STOCK
-    elif action == "existing":
-        user_id = str(update.effective_user.id)
-        stocks = user_alerts.get(user_id, [])
-        if not stocks:
-            await query.edit_message_text("⚠️ You have no existing stock alerts.")
+    if query.data == "search":
+        await query.message.reply_text("Provide stock name:")
+        return SEARCH
+    elif query.data == "alerts":
+        alert_list = "\n".join([f"{stock}: {price}" for stock, price in user_alerts.items()]) or "No alerts set."
+        await query.message.reply_text(alert_list)
+    elif query.data == "add":
+        await query.message.reply_text("Provide stock name:")
+        return SEARCH
+    elif query.data == "remove":
+        if user_alerts:
+            keyboard = [[InlineKeyboardButton(stock, callback_data=f"remove_{stock}")] for stock in user_alerts]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("Select stock to remove:", reply_markup=reply_markup)
+            return REMOVE_ALERT
         else:
-            msg = "📊 *Your current alerts:*\n" + "\n".join([f"- {s}" for s in stocks])
-            await query.edit_message_text(msg, parse_mode="Markdown")
-        return MAIN_MENU
-    elif action == "remove":
-        user_id = str(update.effective_user.id)
-        stocks = user_alerts.get(user_id, [])
-        if not stocks:
-            await query.edit_message_text("⚠️ You have no stocks to remove.")
-            return MAIN_MENU
-        keyboard = [[InlineKeyboardButton(stock, callback_data=stock)] for stock in stocks]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("📉 *Select stock to remove:*", reply_markup=reply_markup, parse_mode="Markdown")
-        return REMOVE_STOCK
+            await query.message.reply_text("No alerts to remove.")
 
+# Search for stock by name
 async def search_stock(update: Update, context: CallbackContext):
-    text = update.message.text.lower()
-    matches = get_stock_suggestions(text)
+    stock_name = update.message.text
+    url = f"https://finnhub.io/api/v1/search?q={stock_name}&token={FINNHUB_API_KEY}"
+    response = httpx.get(url).json()
 
-    if not matches:
-        await update.message.reply_text("⚠️ No matching stocks found.")
-        return MAIN_MENU
-
-    keyboard = [[InlineKeyboardButton(stock, callback_data=stock)] for stock in matches]
-    keyboard.append([InlineKeyboardButton("🔄 Show More Results", callback_data=f"more_{text}")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text("📈 *Select a stock:*", reply_markup=reply_markup, parse_mode="Markdown")
-    return HANDLE_STOCK_SELECTION
-
-async def show_more_results(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    stock_query = query.data.replace("more_", "")
-    matches = get_stock_suggestions(stock_query)
-
-    keyboard = [[InlineKeyboardButton(stock, callback_data=stock)] for stock in matches]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text("📈 *More stock results:*", reply_markup=reply_markup, parse_mode="Markdown")
-    return HANDLE_STOCK_SELECTION
-
-async def handle_stock_selection(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    stock = query.data
-    context.user_data["selected_stock"] = stock
-    user_id = str(update.effective_user.id)
-    
-    if stock not in user_alerts.get(user_id, []):
-        user_alerts.setdefault(user_id, []).append(stock)
-        await query.edit_message_text(f"✅ Alert set for *{stock}*!", parse_mode="Markdown")
+    if response.get("result"):
+        keyboard = [[InlineKeyboardButton(stock["description"], callback_data=f"select_{stock['symbol']}")] for stock in response["result"]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Select a stock:", reply_markup=reply_markup)
     else:
-        await query.edit_message_text(f"⚠️ Already tracking *{stock}*.", parse_mode="Markdown")
+        await update.message.reply_text("No results found.")
 
-    return MAIN_MENU
-
-async def remove_stock(update: Update, context: CallbackContext):
+# Select a stock from the search results
+async def select_stock(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
-    stock = query.data
-    user_id = str(update.effective_user.id)
-    
-    if stock in user_alerts.get(user_id, []):
-        user_alerts[user_id].remove(stock)
-        await query.edit_message_text(f"❌ Removed alert for *{stock}*.", parse_mode="Markdown")
-    return MAIN_MENU
+    symbol = query.data.split("_")[1]
+    url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+    data = httpx.get(url).json()
+    message = f"{symbol} \nCurrent Price: {data['c']} \nHigh: {data['h']} \nLow: {data['l']}"
 
-async def back_to_menu(update: Update, context: CallbackContext):
     keyboard = [
-        [InlineKeyboardButton("🔍 Search Stock", callback_data="search")],
-        [InlineKeyboardButton("📈 Existing Alerts", callback_data="existing")],
-        [InlineKeyboardButton("❌ Remove Stock", callback_data="remove")]
+        [InlineKeyboardButton("Set Alert", callback_data=f"alert_{symbol}")],
+        [InlineKeyboardButton("Show More Stocks", callback_data="search")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("📌 *Main Menu:*", reply_markup=reply_markup, parse_mode="Markdown")
-    return MAIN_MENU
+    await query.message.reply_text(message, reply_markup=reply_markup)
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+# Set price alert for a stock
+async def set_alert(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    symbol = query.data.split("_")[1]
+    user_alerts[symbol] = None
+    await query.message.reply_text(f"Set price alert for {symbol} (reply with price):")
+    return SET_ALERT
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            MAIN_MENU: [
-                CallbackQueryHandler(main_menu_handler),
-                CommandHandler("menu", back_to_menu)
-            ],
-            SEARCH_STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock)],
-            HANDLE_STOCK_SELECTION: [
-                CallbackQueryHandler(handle_stock_selection),
-                CallbackQueryHandler(show_more_results, pattern="^more_"),
-            ],
-            REMOVE_STOCK: [CallbackQueryHandler(remove_stock)],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    )
+# Save the alert price
+async def save_alert(update: Update, context: CallbackContext):
+    price = float(update.message.text)
+    stock = list(user_alerts.keys())[-1]
+    user_alerts[stock] = price
+    await update.message.reply_text(f"Alert set for {stock} at {price}")
+    return ConversationHandler.END
 
-    app.add_handler(conv_handler)
-    app.run_polling()
+# Remove alert for a stock
+async def remove_alert(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    stock = query.data.split("_")[1]
+    user_alerts.pop(stock, None)
+    await query.message.reply_text(f"Removed alert for {stock}")
+    return ConversationHandler.END
+
+# Check and send alerts when stock reaches target price
+async def check_alerts(context: CallbackContext):
+    for stock, target_price in user_alerts.items():
+        url = f"https://finnhub.io/api/v1/quote?symbol={stock}&token={FINNHUB_API_KEY}"
+        data = httpx.get(url).json()
+        current_price = data.get("c")
+        if current_price and target_price and current_price <= target_price:
+            await context.bot.send_message(chat_id=context.job.chat_id, text=f"{stock} reached your alert price: {target_price}")
+
+# Create the application and add handlers
+application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock)],
+        SET_ALERT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_alert)],
+        REMOVE_ALERT: [CallbackQueryHandler(remove_alert, pattern="^remove_")]
+    },
+    fallbacks=[]
+)
+
+application.add_handler(conv_handler)
+application.add_handler(CallbackQueryHandler(button_handler))
+application.add_handler(CallbackQueryHandler(select_stock, pattern="^select_"))
+application.add_handler(CallbackQueryHandler(set_alert, pattern="^alert_"))
+application.job_queue.run_repeating(check_alerts, interval=3600)
+
+# Start the bot polling
+application.run_polling()
