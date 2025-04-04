@@ -1,131 +1,74 @@
+import logging import os import requests from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update from telegram.ext import (ApplicationBuilder, CallbackContext, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler)
 
-import os
-import asyncio
-import logging
-import time
-from dotenv import load_dotenv
-from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackContext, MessageHandler, filters, CallbackQueryHandler
+from dotenv import load_dotenv load_dotenv()
 
-# Load Environment Variables
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN") PORT = int(os.environ.get('PORT', 8443))
 
-# Check if token exists
-if not TELEGRAM_TOKEN:
-    raise ValueError("Missing TELEGRAM_TOKEN. Set it in your environment or .env file.")
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Enable logging
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+MAIN_MENU, SEARCH_STOCK, HANDLE_STOCK_SELECTION, SET_ALERT, REMOVE_STOCK, SHOW_EXISTING, DETAILED_INFO = range(7)
 
-# Store user preferences (Alerts, Companies, etc.)
-user_data = {}
+user_alerts = {}
 
-# Mock function to fetch stock prices (Replace with real API if needed)
-def get_stock_price(company):
-    stock_prices = {
-        "Jupiter Wagons": 330,
-        "Suzlon Energy": 55,
-        "Trident": 24
-    }
-    return stock_prices.get(company, "Unknown")
+Simulated stock database
 
-# /start command handler
-async def start(update: Update, context: CallbackContext):
-    keyboard = [
-        [InlineKeyboardButton("🔎 Search Stock", callback_data='search_stock')],
-        [InlineKeyboardButton("➕ New Stock Alert", callback_data='set_alert')],
-        [InlineKeyboardButton("📋 Existing Stock Alerts", callback_data='list_alerts')],
-        [InlineKeyboardButton("⚙️ Manage Stocks", callback_data='manage_stocks')]
-    ]
+mock_stock_data = { "Phillips": { "price": 210, "details": "Philips India Limited manufactures and markets consumer electronics. Sector: Consumer Durables, P/E: 22.5, ROE: 18%" }, "Philippines Chilli": { "price": 105, "details": "Philippines Chilli Exports Ltd - Sector: Agriculture, Volatility: High, P/E: 11.2" }, "Phillips Trimmer": { "price": 325, "details": "Phillips Trimmer Ltd - Sector: Personal Care Products, P/E: 15.9, Good Market Penetration" }, }
+
+async def start(update: Update, context: CallbackContext.DEFAULT_TYPE): keyboard = [[ InlineKeyboardButton("Search Stock", callback_data="search"), InlineKeyboardButton("New Stock Alert", callback_data="add") ], [ InlineKeyboardButton("Existing Stock Alerts", callback_data="existing"), InlineKeyboardButton("Remove Stock", callback_data="remove") ]] reply_markup = InlineKeyboardMarkup(keyboard) await update.message.reply_text("Welcome to TeleStockBot!", reply_markup=reply_markup) return MAIN_MENU
+
+async def main_menu_handler(update: Update, context: CallbackContext.DEFAULT_TYPE): query = update.callback_query await query.answer() action = query.data if action == "search" or action == "add": context.user_data['add_mode'] = action == "add" await query.edit_message_text("Enter stock name to search:") return SEARCH_STOCK elif action == "existing": user_id = str(update.effective_user.id) stocks = user_alerts.get(user_id, []) if not stocks: await query.edit_message_text("You have no existing stock alerts.") return MAIN_MENU msg = "Your current alerts:\n" + "\n".join(stocks) await query.edit_message_text(msg) return MAIN_MENU elif action == "remove": user_id = str(update.effective_user.id) stocks = user_alerts.get(user_id, []) if not stocks: await query.edit_message_text("You have no stocks to remove.") return MAIN_MENU keyboard = [[InlineKeyboardButton(stock, callback_data=stock)] for stock in stocks] reply_markup = InlineKeyboardMarkup(keyboard) await query.edit_message_text("Select stock to remove:", reply_markup=reply_markup) return REMOVE_STOCK
+
+async def search_stock(update: Update, context: CallbackContext.DEFAULT_TYPE): text = update.message.text.lower() matches = [name for name in mock_stock_data if text in name.lower()] if not matches: await update.message.reply_text("No matching stocks found.") return MAIN_MENU keyboard = [[InlineKeyboardButton(stock, callback_data=stock)] for stock in matches] reply_markup = InlineKeyboardMarkup(keyboard) await update.message.reply_text("Select a stock:", reply_markup=reply_markup) return HANDLE_STOCK_SELECTION
+
+async def handle_stock_selection(update: Update, context: CallbackContext.DEFAULT_TYPE): query = update.callback_query await query.answer() stock = query.data context.user_data['selected_stock'] = stock
+
+if context.user_data.get('add_mode'):
+    keyboard = [[
+        InlineKeyboardButton("Set Alert", callback_data="set_alert"),
+        InlineKeyboardButton("Detailed Info", callback_data="details")
+    ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Welcome to Stock Alert Bot! Choose an option:", reply_markup=reply_markup)
+    await query.edit_message_text(f"You selected: {stock}", reply_markup=reply_markup)
+    return HANDLE_STOCK_SELECTION
+else:
+    price = mock_stock_data[stock]['price']
+    await query.edit_message_text(f"Current price of {stock}: ₹{price}")
+    return MAIN_MENU
 
-# Button click handler
-async def button_handler(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "search_stock":
-        await query.message.reply_text("Enter the stock name to search (e.g., 'Jupiter Wagons').")
-    elif query.data == "set_alert":
-        await query.message.reply_text("Enter the company name and price (e.g., 'Jupiter Wagons 320').")
-    elif query.data == "list_alerts":
-        chat_id = query.message.chat_id
-        if chat_id in user_data and user_data[chat_id]:
-            alerts = "\n".join([f"{d['company']} - ₹{d['price']}" for d in user_data[chat_id]])
-            await query.message.reply_text(f"Your active alerts:\n{alerts}")
-        else:
-            await query.message.reply_text("No alerts set.")
-    elif query.data == "manage_stocks":
-        await query.message.reply_text("Send /add to add a stock or /remove to remove.")
+async def handle_alert_or_info(update: Update, context: CallbackContext.DEFAULT_TYPE): query = update.callback_query await query.answer() action = query.data stock = context.user_data.get('selected_stock') user_id = str(update.effective_user.id)
 
-# Search stock function
-async def search_stock(update: Update, context: CallbackContext):
-    company = update.message.text.strip()
-    price = get_stock_price(company)
-    if price == "Unknown":
-        await update.message.reply_text(f"Stock '{company}' not found!")
-    else:
-        await update.message.reply_text(f"{company} is currently at ₹{price}")
+if action == "set_alert":
+    user_alerts.setdefault(user_id, []).append(stock)
+    await query.edit_message_text(f"Alert set for {stock}!")
+elif action == "details":
+    details = mock_stock_data[stock]['details']
+    await query.edit_message_text(f"Details for {stock}:\n{details}")
 
-# Stock alert handler
-async def set_alert(update: Update, context: CallbackContext):
-    message = update.message.text.split()
-    if len(message) < 2:
-        await update.message.reply_text("Invalid format! Use: CompanyName Price")
-        return
+return MAIN_MENU
 
-    company = " ".join(message[:-1])
-    try:
-        price = float(message[-1])
-    except ValueError:
-        await update.message.reply_text("Invalid price! Please enter a valid number.")
-        return
+async def remove_stock(update: Update, context: CallbackContext.DEFAULT_TYPE): query = update.callback_query await query.answer() stock = query.data user_id = str(update.effective_user.id) user_alerts[user_id].remove(stock) await query.edit_message_text(f"Removed alert for {stock}.") return MAIN_MENU
 
-    chat_id = update.message.chat_id
-    if chat_id not in user_data:
-        user_data[chat_id] = []
+if name == 'main': app = ApplicationBuilder().token(TOKEN).build()
 
-    user_data[chat_id].append({"company": company, "price": price})
-    await update.message.reply_text(f"Alert set for {company} at ₹{price}.")
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('start', start)],
+    states={
+        MAIN_MENU: [
+            CallbackQueryHandler(main_menu_handler)
+        ],
+        SEARCH_STOCK: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock)
+        ],
+        HANDLE_STOCK_SELECTION: [
+            CallbackQueryHandler(handle_alert_or_info)
+        ],
+        REMOVE_STOCK: [
+            CallbackQueryHandler(remove_stock)
+        ]
+    },
+    fallbacks=[CommandHandler('start', start)]
+)
 
-# Alert checking function
-async def check_alerts(application):
-    to_remove = []
-    for chat_id, alerts in user_data.items():
-        for alert in alerts:
-            current_price = get_stock_price(alert['company'])
-            if current_price != "Unknown" and current_price <= alert['price']:
-                await application.bot.send_message(chat_id=chat_id, text=f"🚨 ALERT: {alert['company']} has reached ₹{current_price}!")
-                to_remove.append((chat_id, alert))
+app.add_handler(conv_handler)
+app.run_polling()
 
-    for chat_id, alert in to_remove:
-        user_data[chat_id].remove(alert)
-
-# Function to run scheduled tasks
-def run_schedule(application):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    while True:
-        loop.run_until_complete(check_alerts(application))
-        time.sleep(30)
-
-# Main function to run bot
-def main():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_alert))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_stock))
-
-    # Run scheduler in a separate thread
-    Thread(target=run_schedule, args=(application,), daemon=True).start()
-
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
