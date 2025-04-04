@@ -1,6 +1,17 @@
-import os import logging import httpx from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update from telegram.ext import ( ApplicationBuilder, CallbackContext, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ConversationHandler, ) from dotenv import load_dotenv
-
-Load environment variables
+import os
+import logging
+import httpx
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackContext,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ConversationHandler,
+)
+from dotenv import load_dotenvLoad environment variables
 
 load_dotenv() TOKEN = os.getenv("BOT_TOKEN") PORT = int(os.environ.get("PORT", 8443))
 
